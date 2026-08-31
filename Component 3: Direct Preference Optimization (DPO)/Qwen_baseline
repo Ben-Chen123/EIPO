@@ -1,0 +1,116 @@
+#Qwen
+import pandas as pd
+from transformers import pipeline
+import openai
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
+import json  # Import the json module
+import os
+import time
+from huggingface_hub import login
+import torch
+from huggingface_hub import InferenceClient
+import os
+
+
+openai.api_key ='sk-5qgKSM8d9qiar7eFjsJV51Z0Ad4rCuSG0OPOJuDGvrHqFHpM'
+openai.base_url = "https://api.chatanywhere.org"
+#openai.default_headers = {"x-foo": "true"}
+api_key_gpt4 =''
+conversation_history=[]
+
+login("")
+client = InferenceClient(api_key="")
+model_name = "Qwen/Qwen2.5-Coder-32B-Instruct"
+
+def save_conversation_to_file(conversation_history, filename):
+        with open(filename, 'w') as f:
+            json.dump(conversation_history, f, indent=4)
+
+def add_content_to_json_file(new_content, filename):
+    if os.path.exists(filename):
+             with open(filename, 'r') as f:
+                existing_data = json.load(f)
+    else:
+        existing_data = []
+    
+    if isinstance(existing_data, list):
+        existing_data.append(new_content)  # Append new content if it's a list
+    elif isinstance(existing_data, dict):
+        if isinstance(new_content, dict):
+            existing_data.update(new_content)  # Update if new_content is a dictionary
+        else:
+            raise ValueError("New content must be a dictionary when existing data is a dictionary.")
+    else:
+        raise ValueError("Existing data must be a list or dictionary.")
+
+    with open(filename, 'w') as f:
+        json.dump(existing_data, f, indent=4)
+
+def get_qwen_response(messages):
+    completion = client.chat.completions.create(
+    model="Qwen/Qwen2.5-Coder-32B-Instruct", 
+    messages=messages, 
+    max_tokens=300
+    )
+    print(completion.choices[0].message["content"])
+    return completion.choices[0].message["content"]
+
+prompt_CoT = (
+    f"You are an emotionally intelligent assistant designed to support users in sensitive and emotionally challenging situations, "
+    f"such as procrastination, stress, self-doubt, or interpersonal conflicts.\n\n"
+    
+    f"Before generating your response, follow these reasoning steps to simulate high emotional intelligence, inspired by Goleman's framework:\n\n"
+    f"Step 1: [Understanding Context] — Interpret what the user is experiencing or trying to communicate. What is the situation, concern, or emotional need?\n"
+    f"Step 2: [Recognizing User's Emotions] — Identify the likely emotions the user is feeling. Provide reasoning based on clues from their message (e.g., word choice, tone, or context).\n" 
+    f"Step 3: [Setting Your Emotional Stance] — Determine the most appropriate tone, mindset, and emotional posture you should adopt in response (e.g., calm, encouraging, empathetic).\n" 
+    f"Step 4: [Managing Your Emotional Expression] — Reflect on how to express your response constructively: avoid judgment, reinforce support, and remain emotionally balanced.\n"
+    f"Step 5: [Positively Influencing the User] — Decide how to move the conversation forward in a helpful, emotionally uplifting, and goal-directed way. What will help reduce distress, increase motivation, or build connection?\n\n"
+    f"Final Step: [Emotionally Intelligent Response] — Generate a concise, warm, and constructive response to the user's message, applying all of the above reasoning.\n\n"
+
+    f"Show all your reasoning steps first, then write the final emotional response."
+)
+
+
+prompt_EGS=(
+    f"You are an expert evaluating the emotional intelligence of a chatbot's response using the Emotional Generation Score (EGS) framework to evaluate the assistant response above. There are four evaluation criteria:\n"
+    f"C1: Context Relevance — Does the response align appropriately with the user's message and situation?"
+    f"C2: Emotional Safety — Does the response avoid conveying any negative emotions toward anyone or anything, such as disgust, resentment, discrimination, or hatred?"
+    f"C3: Positive Emotion — Does the response convey positive emotions such as happiness, empathy, support, advice, encouragement, or comfort?"
+    f"C4: Constructive Contribution — Does the response help move the conversation forward in a positive way, such as by easing negative emotions or strengthening the relationship between the speaker and the user?"
+    f"Please rate each criterion from 0 to 10, where:\n"
+    f"0 = completely fails the criterion\n"
+    f"10 = fully satisfies the criterion\n"
+    f"After scoring, provide a short explanation for each score.\n"
+    f"Your evaluation:\n"
+    f"C1 (Context Relevance): [0–10] — [brief explanation]"
+    f"C2 (Emotional Safety): [0–10] — [brief explanation]"
+    f"C3 (Positive Emotion): [0–10] — [brief explanation]"
+    f"C4 (Constructive Contribution): [0–10] — [brief explanation]"  
+)
+def evaluation(messages,query):
+    messages.append({"role": "system", "content": query})
+    response = openai.chat.completions.create(
+    model="gpt-4-turbo",
+    messages=messages,
+    )
+    print(response.choices[0].message.content)
+    return response.choices[0].message.content
+
+df = pd.read_csv("procrastination.csv").iloc[2:10]
+for i, row in df.iterrows():
+    user_input = str(row["chat_history"])
+    conversation_history = []
+    conversation_history.append({"role": "user", "content": user_input})
+    conversation_history.append({"role": "system", "content": prompt_CoT})
+    res=get_qwen_response(conversation_history)
+    conversation_history.append({"role": "assistant", "content":res})
+    openai.api_key=api_key_gpt4
+    openai.base_url="https://api.openai.com/v1/"
+    eva=evaluation(conversation_history,prompt_EGS)
+    conversation_history.append({"role": "assistant", "content":eva})
+    filename="qwen_result.json"
+    #save_conversation_to_file(conversation_history,filename)
+    add_content_to_json_file(conversation_history,filename)
+    print(f"Processed entry {i + 1}")
+    time.sleep(1) 
+print("All entries processed and saved.")
