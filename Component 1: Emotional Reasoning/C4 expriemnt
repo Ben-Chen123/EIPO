@@ -1,0 +1,161 @@
+#C4 expriemnt
+#ECoT
+import pandas as pd
+from transformers import pipeline
+import openai
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
+import json  # Import the json module
+import os
+import time
+
+openai.api_key ='sk-5qgKSM8d9qiar7eFjsJV51Z0Ad4rCuSG0OPOJuDGvrHqFHpM'
+openai.base_url = "https://api.chatanywhere.org"
+#openai.default_headers = {"x-foo": "true"}
+api_key_gpt4 =''
+conversation_history=[]
+
+def save_conversation_to_file(conversation_history, filename):
+        with open(filename, 'w') as f:
+            json.dump(conversation_history, f, indent=4)
+
+def add_content_to_json_file(new_content, filename):
+    if os.path.exists(filename):
+             with open(filename, 'r') as f:
+                existing_data = json.load(f)
+    else:
+        existing_data = []
+    
+    if isinstance(existing_data, list):
+        existing_data.append(new_content)  # Append new content if it's a list
+    elif isinstance(existing_data, dict):
+        if isinstance(new_content, dict):
+            existing_data.update(new_content)  # Update if new_content is a dictionary
+        else:
+            raise ValueError("New content must be a dictionary when existing data is a dictionary.")
+    else:
+        raise ValueError("Existing data must be a list or dictionary.")
+
+    with open(filename, 'w') as f:
+        json.dump(existing_data, f, indent=4)
+
+def get_gpt_response(response):
+    response = openai.chat.completions.create(
+    model="gpt-3.5-turbo",
+    messages=response,
+    max_tokens=500,
+    temperature=0.5,
+    top_p=0.7
+    )
+    print(response.choices[0].message.content)
+    return response.choices[0].message.content
+
+def process_pipeline(input_text):
+    """Process user input through classifiers."""
+    classifier1_output = pipe_valence(input_text)
+    classifier2_output = pipe_labels(input_text)
+    classifier3_output = pipe_sublabel(input_text)
+
+    return {
+        "classifier1": Valence_mapping.get(classifier1_output[0]["label"], "Unknown Valence"),
+        "classifier2": Labels_mapping.get(classifier2_output[0]["label"], "Unknown Label"),
+        "classifier3": Sublabel_mapping.get(classifier3_output[0]["label"], "Unknown Sublabel"),
+    }
+
+def map_nlu_output_to_action(nlu_output, behaviours_df):
+    """Map classified labels to behavior actions from dataset."""
+    if nlu_output["classifier2"] in ["Taking Steps", "Commitment"]:
+        matching_row = behaviours_df[
+            (behaviours_df["Valence"] == nlu_output["classifier1"])
+            & (behaviours_df["Label"] == nlu_output["classifier2"])
+        ]
+    else:
+        matching_row = behaviours_df[
+            (behaviours_df["Valence"] == nlu_output["classifier1"])
+            & (behaviours_df["Label"] == nlu_output["classifier2"])
+            & (behaviours_df["Sublabel"] == nlu_output["classifier3"])
+        ]
+
+    if not matching_row.empty:
+        return matching_row.iloc[0]["Action"], matching_row.iloc[0]["Description"]
+    return "No matching action found, continue conversation.", None
+
+# Load tokenizer and models
+tokenizer = AutoTokenizer.from_pretrained("google-bert/bert-base-uncased")
+pipe_valence = pipeline("text-classification", model="../results_valence/checkpoint-270", tokenizer=tokenizer)
+pipe_labels = pipeline("text-classification", model="../results_labels/checkpoint-270", tokenizer=tokenizer)
+pipe_sublabel = pipeline("text-classification", model="../results_sublabel/checkpoint-270", tokenizer=tokenizer) 
+
+# Define label mappings
+Valence_mapping = {"LABEL_0": "ambivalence", "LABEL_1": "change", "LABEL_2": "sustain"}
+Labels_mapping = {"LABEL_0": "Commitment", "LABEL_1": "Reason", "LABEL_2": "Taking Steps"}
+Sublabel_mapping = {"LABEL_0": "General Reason", "LABEL_1": "Ability", "LABEL_2": "Desire"}
+
+# Load behavior dataset
+behaviours_df = pd.read_csv("../Behaviours.csv", header=0, on_bad_lines="skip", sep=";")
+
+prompt_CoT=(
+    f"You are an emotionally intelligent assistant designed to support users through sensitive and emotionally charged situations, such as procrastination, stress, or interpersonal conflicts.\n"
+    f"Follow these reasoning steps before responding. Think carefully and sequentially to simulate human-like emotional intelligence, based on Goleman’s framework:\n"
+    f"Step 1: [Understanding Context] Describe what the user is experiencing or communicating based on their message."
+    f"Step 2: [Recognizing Others’ Emotions] Identify what emotions the user might be feeling. Support your answer with specific clues from the message."
+    f"Step 3: [Recognizing Self-Emotions] Reflect on what tone and emotional stance you, as the assistant, should adopt to best support the user."
+    f"Step 4: [Managing Self-Emotions] Think about how to regulate your emotional expression to remain calm, constructive, and non-judgmental."
+    f"Step 5: [Influencing Others’ Emotions] Plan how your response can improve the user’s emotional state or move the conversation in a more positive direction."
+    f"Final Step: [Emotional Response] Write a short, emotionally intelligent reply based on all the reasoning steps above."
+    f"User message:"
+    f"Please show all your thinking steps, then generate the final emotional response."
+)
+prompt_EGS=(
+    f"You are an expert evaluating the emotional intelligence of a chatbot's response using the Emotional Generation Score (EGS) framework to evaluate the assistant response above. There are four evaluation criteria:\n"
+    f"C1: Context Relevance — Does the response align appropriately with the user's message and situation?"
+    f"C2: Emotional Safety — Does the response avoid conveying any negative emotions toward anyone or anything, such as disgust, resentment, discrimination, or hatred?"
+    f"C3: Positive Emotion — Does the response convey positive emotions such as happiness, empathy, support, advice, encouragement, or comfort?"
+    f"C4: Constructive Contribution — Does the response help move the conversation forward in a positive way, such as by easing negative emotions or strengthening the relationship between the speaker and the user?"
+    f"Please rate each criterion from 0 to 10, where:\n"
+    f"0 = completely fails the criterion\n"
+    f"10 = fully satisfies the criterion\n"
+    f"After scoring, provide a short explanation for each score.\n"
+    f"Your evaluation:\n"
+    f"C1 (Context Relevance): [0–10] — [brief explanation]"
+    f"C2 (Emotional Safety): [0–10] — [brief explanation]"
+    f"C3 (Positive Emotion): [0–10] — [brief explanation]"
+    f"C4 (Constructive Contribution): [0–10] — [brief explanation]"  
+)
+def evaluation(messages,query):
+    messages.append({"role": "system", "content": query})
+    response = openai.chat.completions.create(
+    model="gpt-4-turbo",
+    messages=messages,
+    )
+    print(response.choices[0].message.content)
+    return response.choices[0].message.content
+
+df = pd.read_csv("procrastination.csv").iloc[1:274]
+for i, row in df.iterrows():
+    user_input = str(row["chat_history"])
+    conversation_history = []
+    conversation_history.append({"role": "user", "content": user_input})
+    nlu_output = process_pipeline(user_input)
+    conversation_history.append({"role": "system", "content": str(nlu_output)})
+    # Get mapped action
+    action, description = map_nlu_output_to_action(nlu_output, behaviours_df)
+    # Add system-generated action to history
+    conversation_history.append({"role": "system", "content": f"Suggested Action: {action} - {description}"})
+    # Generate new GPT prompt using action
+    prompt = f"Please generate a prompt based on this action: {action}."
+    conversation_history.append({"role": "system", "content": prompt})
+    final_prompt = get_gpt_response(conversation_history)
+    conversation_history.append({"role": "system", "content":final_prompt})
+    conversation_history.append({"role": "system", "content": prompt_CoT})
+    res=get_gpt_response(conversation_history)
+    conversation_history.append({"role": "assistant", "content":res})
+    openai.api_key=api_key_gpt4
+    openai.base_url="https://api.openai.com/v1/"
+    eva=evaluation(conversation_history,prompt_EGS)
+    conversation_history.append({"role": "assistant", "content":eva})
+    filename="c4_result.json"
+    #save_conversation_to_file(conversation_history,filename)
+    add_content_to_json_file(conversation_history,filename)
+    print(f"Processed entry {i + 1}")
+    time.sleep(1) 
+print("All entries processed and saved.")
