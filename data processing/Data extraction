@@ -1,0 +1,37 @@
+#Data extraction
+import json
+import re
+import csv
+
+# Load your JSON data (replace with actual loading if reading from a file)
+with open('qwen_result_finetuned.json', 'r', encoding='utf-8') as f:
+    data = json.load(f)
+
+# Extract C1–C4 scores using regex
+results = []
+evaluation_index = 0
+
+# Loop through each conversation
+for conversation in data:
+    if isinstance(conversation, list):
+        for entry in conversation:
+            if isinstance(entry, dict) and entry.get("role") == "assistant":
+                content = entry.get("content", "")
+                match = re.search(r"C1.*?(\d+)\s.*?C2.*?(\d+)\s.*?C3.*?(\d+)\s.*?C4.*?(\d+)", content, re.DOTALL)
+                if match:
+                    scores = {
+                        "id": evaluation_index,
+                        "C1": int(match.group(1)),
+                        "C2": int(match.group(2)),
+                        "C3": int(match.group(3)),
+                        "C4": int(match.group(4)),
+                    }
+                    results.append(scores)
+                    evaluation_index += 1
+                    
+with open("qwen_result_finetuned_scores.csv", "w", newline="", encoding="utf-8") as f:
+    writer = csv.DictWriter(f, fieldnames=["id", "C1", "C2", "C3", "C4"])
+    writer.writeheader()
+    writer.writerows(results)
+
+print("Saved EGS scores")
