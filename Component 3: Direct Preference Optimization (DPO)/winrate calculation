@@ -1,0 +1,28 @@
+#winrate calculation
+import json
+
+with open("winrate_final.json", "r", encoding="utf-8") as f:
+    data = json.load(f)
+
+winners = []
+
+def extract_winners(item):
+    if isinstance(item, dict) and item.get("role") == "winner":
+        winners.append(item["content"].strip()[0])  # 'A' or 'B'
+    elif isinstance(item, list):
+        for sub in item:
+            extract_winners(sub)
+    elif isinstance(item, dict):
+        for v in item.values():
+            extract_winners(v)
+
+extract_winners(data)
+
+total = len(winners)
+win_rate_A = winners.count("A") / total if total > 0 else 0
+win_rate_B = winners.count("B") / total if total > 0 else 0
+
+print(f"Total comparisons: {total}")
+print(f"Response A win rate: {win_rate_A:.2%}")
+print(f"Response B win rate: {win_rate_B:.2%}")
+
