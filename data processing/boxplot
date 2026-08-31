@@ -1,0 +1,75 @@
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from scipy.stats import ttest_rel
+
+# Load data
+classifier_data = pd.read_csv("ECoT_scores_all.csv")
+ecot_data = pd.read_csv("feedback_data_scores_all.csv")
+
+# Calculate mean score (C1-C4)
+classifier_data["Mean Score"] = classifier_data[["C1", "C2", "C3", "C4"]].mean(axis=1)
+ecot_data["Mean Score"] = ecot_data[["C1", "C2", "C3", "C4"]].mean(axis=1)
+
+# -------------------------
+# Paired t-test
+# -------------------------
+t_stat, p_value = ttest_rel(
+    ecot_data["Mean Score"],
+    classifier_data["Mean Score"]
+)
+
+print("=" * 50)
+print("Paired t-test")
+print("=" * 50)
+print(f"t-statistic = {t_stat:.4f}")
+print(f"p-value     = {p_value:.6e}")
+
+if p_value < 0.05:
+    print("Result: Significant difference (p < 0.05)")
+else:
+    print("Result: No significant difference")
+print("=" * 50)
+
+# Combine data
+combined_df = pd.concat([
+    pd.DataFrame({
+        "Method": "Emotional Chain-of-Thought",
+        "Mean Score": classifier_data["Mean Score"]
+    }),
+    pd.DataFrame({
+        "Method": "Self-correction Emotional Chain-of-Thought",
+        "Mean Score": ecot_data["Mean Score"]
+    })
+], ignore_index=True)
+
+# Create boxplot
+plt.figure(figsize=(7, 6))
+
+sns.boxplot(
+    x="Method",
+    y="Mean Score",
+    data=combined_df,
+    palette="Set2"
+)
+
+# Annotate p-value
+y = combined_df["Mean Score"].max() + 0.05
+plt.plot([0, 0, 1, 1], [y, y+0.03, y+0.03, y], lw=1.5, c='black')
+
+if p_value < 0.0001:
+    label = "****  p < 0.0001"
+else:
+    label = f"p = {p_value:.4f}"
+
+plt.text(0.5, y+0.04, label, ha='center', fontsize=11)
+
+plt.title("Average EGS Score (Mean of C1–C4)", fontsize=14)
+plt.xlabel("")
+plt.ylabel("Mean Score", fontsize=12)
+plt.ylim(8, 10.4)
+plt.grid(axis="y", linestyle="--", alpha=0.3)
+
+plt.tight_layout()
+plt.savefig("RQ2.png", dpi=300)
+plt.show()
