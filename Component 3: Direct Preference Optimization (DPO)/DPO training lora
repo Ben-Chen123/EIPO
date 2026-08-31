@@ -1,0 +1,62 @@
+#DPO training lora
+import os
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+
+from transformers import AutoTokenizer, AutoModelForCausalLM
+from datasets import load_dataset
+from trl import DPOTrainer, DPOConfig
+from peft import LoraConfig, get_peft_model
+
+model_name = "Qwen/Qwen2.5-Coder-7B-Instruct"
+
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+tokenizer.pad_token = tokenizer.eos_token
+
+model = AutoModelForCausalLM.from_pretrained(
+    model_name,
+    torch_dtype="auto",
+    device_map="auto"
+)
+
+model.gradient_checkpointing_enable()
+
+# Setup LoRA for QLoRA-style fine-tuning
+lora_config = LoraConfig(
+    r=8,                # LoRA rank
+    lora_alpha=16,      # LoRA scaling factor
+    target_modules=["q_proj", "v_proj"],  # Adapt key attention layers
+    lora_dropout=0.05,
+    bias="none",
+    task_type="CAUSAL_LM"
+)
+
+model = get_peft_model(model, lora_config)
+
+dataset = load_dataset("json", data_files="converted_dpo_dataset.json", split="train")
+
+# DPO Training args
+training_args = DPOConfig(
+    output_dir="qwen-dpo-lora-checkpoints",
+    per_device_train_batch_size=1,  # Low to save memory
+    gradient_accumulation_steps=4,
+    num_train_epochs=3,
+    logging_steps=10,
+    save_steps=200,
+    save_total_limit=2,
+    learning_rate=5e-5,
+    fp16=True,
+    beta=0.1,
+    report_to="none"
+)
+
+trainer = DPOTrainer(
+    model=model,
+    ref_model=None,  # Will auto-create frozen reference
+    args=training_args,
+    train_dataset=dataset
+)
+trainer.tokenizer = tokenizer
+trainer.train()
+
+trainer.model.save_pretrained("qwen-dpo-finetuned")
+tokenizer.save_pretrained("qwen-dpo-finetuned")
